@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Private</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <script lang="javascript" src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+    <style>
+        .card {
+            max-width: 20rem;
+        }
+
+        #app {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="app">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Get Money XLSX:</h5>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" id="money-option-selector-url" :value="money.options.url" v-model="money.selector">
+                    <label class="form-check-label" for="money-option-selector-url">URL</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" id="money-option-selector-json" :value="money.options.json" v-model="money.selector">
+                    <label class="form-check-label" for="money-option-selector-json">Plain JSON</label>
+                </div>
+                <button class="btn btn-outline-dark mx-2" type="button" v-on:click="exportMoneyData">Export</button>
+
+                <div class="mb-3" v-if="money.selector === money.options.url">
+                    <label for="money-data-url" class="form-label">URL</label>
+                    <input type="text" class="form-control" id="money-data-url" v-model="money.data.url">
+                </div>
+                <div class="mb-3" v-if="money.selector === money.options.json">
+                    <label for="money-data-json" class="form-label">JSON</label>
+                    <textarea class="form-control" id="money-data-json" rows="3" v-model="money.data.json"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const app = Vue.createApp({
+        data() {
+            return {
+                money: {
+                    options: {
+                        url: 'url',
+                        json: 'json',
+                    },
+                    data: {
+                        url: 'https://api.npoint.io/85ce964ff836742c1130',
+                        json: ''
+                    },
+                    selector: 'url'
+                },
+
+                userMap: new Map([
+                    ['user781318130', 'Linh'],
+                    ['user6609827373', 'Dat']
+                ])
+            }
+        },
+        async created() {
+
+        },
+        computed: {
+
+        },
+        watch: {
+
+        },
+        methods: {
+            getDate(item, rawDate) {
+                const [day, month] = item.split('/')
+                if (month) {
+                    return `2024-${month.replace(':', '').padStart(2, '0')}-${day.padStart(2, '0')}`;
+                }
+                return rawDate
+            },
+            getAmount(item) {
+                let result = null
+                let amountString = item.match(/\d+k/)
+                if (amountString) {
+                    amountString = amountString[0]
+                    result = {
+                        amountString: amountString,
+                        money: amountString.replace('k', '000')
+                    }
+                } else {
+                    amountString = item.match(/\d+tr/)
+                    if (amountString) {
+                        amountString = amountString[0]
+                        result = {
+                            amountString: amountString,
+                            money: amountString.replace('tr', '000000')
+                        }
+                    }
+                }
+                return result
+            },
+            getContent(item, amount) {
+                const amountString = amount?.amountString
+                let result = null
+                if (amountString) {
+                    result = item.split(' ').filter(x => x !== amountString && x).join(' ')
+                }
+                return result
+            },
+            getFrom(item, rawFrom) {
+                if (['Dat', 'Đạt', 'Dat:', 'Đạt:', 'dat:', 'dat'].indexOf(item.trim()) >= 0) {
+                    return 'Dat'
+                } else if (['Linh', 'linh', 'linh:', 'Linh:'].indexOf(item.trim()) >= 0) {
+                    return 'Linh'
+                }
+                return rawFrom
+            },
+            async getMoneyData() {
+                switch (this.money.selector) {
+                    case this.money.options.json:
+                        return JSON.parse(this.money.data.json);
+                    case this.money.options.url:
+                        return await (await fetch(this.money.data.url)).json();
+                    default: return {}
+                }
+            },
+            async exportMoneyData() {
+                const raw_data = await this.getMoneyData()
+
+                const rows = []
+                for (const raw of raw_data.messages) {
+                    if (raw.text.length === 0) continue
+                    let rawFrom = this.userMap.get(raw.from_id)
+
+                    let dateObj = new Date(raw.date)
+                    let rawDate = dateObj.toISOString().split("T")[0]
+
+                    let text = raw.text.split("\n")
+
+                    for (const item of text) {
+                        let date = this.getDate(item, rawDate)
+                        let from = this.getFrom(item, rawFrom)
+                        let amount = this.getAmount(item)
+                        let content = this.getContent(item, amount)
+
+                        rawFrom = from
+                        rawDate = date
+                        if (!amount && !content) {
+                            continue
+                        }
+                        rows.push({
+                            date: date,
+                            from: from,
+                            content: content,
+                            amount: amount.money,
+                            raw: item,
+                        })
+                    }
+                }
+                console.log(rows)
+
+                /* generate worksheet and workbook */
+                const worksheet = XLSX.utils.json_to_sheet(rows);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, "Sample");
+
+                /* calculate column width */
+                const max_width = rows.reduce((w, r) => Math.max(w, r.date.length), 10);
+                worksheet["!cols"] = [ { wch: max_width } ];
+
+                /* create an XLSX file and try to save to Money.xlsx */
+                XLSX.writeFile(workbook, "Money.xlsx", { compression: true });
+
+            },
+        }
+    })
+
+    app.mount('#app')
+
+</script>
+</body>
+</html>
