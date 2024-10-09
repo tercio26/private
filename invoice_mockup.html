@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Issuance Invoice</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/@popperjs/core@2"></script>
+    <script src="https://unpkg.com/tippy.js@6"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        html {
+            font-size: .9rem
+        }
+        aside {
+            max-height: 100vh;
+            overflow: auto;
+            width: 40rem;
+            resize: horizontal;
+            padding: 0.5rem;
+        }
+
+        .content {
+            max-height: 100vh;
+            padding: 0 0.5rem .5rem;
+            width: 100%;
+            overflow: auto;
+        }
+        input {
+            min-width: 5rem;
+        }
+        .formula-cell {
+            outline: 2px solid #f1bf42;
+            background-color: rgba(241, 191, 66, .3) !important;
+        }
+        .element-cell {
+            outline: 2px solid #6ffa5a;
+            background-color: rgba(111, 250, 90, .3) !important;
+        }
+        .focus-cell {
+            outline: 2px solid #cb42f1;
+            background-color: rgba(203, 66, 241, .3) !important;
+        }
+        .cursor-pointer {
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .tippy-box {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div class="d-flex overflow-hidden">
+        <aside>
+            <section class="table-responsive">
+                <h6 class="fw-bold text-primary">consumption_taxes</h6>
+                <table class="table table-sm table-bordered table-hover">
+                    <thead class="text-center bg-secondary">
+                    <th>taxRate</th>
+                    <th>reducedTaxRate</th>
+                    </thead>
+                    <tbody>
+                    <tr>
+                        <td>
+                            <input class="form-control"
+                                   :class="{ 'element-cell': isFormulaElement(focusData.index, invoiceData?.reportData[this.focusData.index], 'consumption_taxes.tax_rate') === 2 }"
+                                   v-model="db.consumption_taxes.tax_rate"/>
+                        </td>
+                        <td>
+                            <input class="form-control"
+                                   :class="{ 'element-cell': isFormulaElement(focusData.index, invoiceData?.reportData[this.focusData.index], 'consumption_taxes.reduced_tax_rate') === 2 }"
+                                   v-model="db.consumption_taxes.reduced_tax_rate"/>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section v-for="(columns, table) in tables" class="table-responsive">
+                <a class="fw-bold text-primary d-flex justify-content-between text-decoration-none"
+                   data-bs-toggle="collapse"
+                   :data-bs-target="'#collapse-table-' + table"
+                   role="button"
+                >{{table}} <span class="dropdown-toggle"></span></a>
+
+                <div :id="'collapse-table-' + table" class="collapse show">
+                    <table class="table table-sm table-bordered table-hover">
+                        <thead class="text-center">
+                        <th v-for="column in tables[table]">{{column}}</th>
+                        </thead>
+                        <tbody>
+                        <tr v-for="item in db[table]">
+                            <td v-for="column in columns">
+                                <input class="form-control"
+                                       :disabled="blockTables.indexOf(table) >= 0"
+                                       :class="{ 'element-cell': isDBFormulaElement(table, column, item) }"
+                                       v-model="item[column]"/>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </aside>
+        <div class="content">
+            <section class="table-responsive sticky-sm-top bg-white border-bottom pb-3">
+                <table class="table table-sm table-bordered table-hover">
+                    <thead>
+                    <tr>
+                        <th>paying_group_id</th>
+                        <th>receiving_group_id</th>
+                        <th>year</th>
+                        <th>month</th>
+                        <th>title</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr>
+                        <td><input class="form-control" v-model="request.paying_group_id"/></td>
+                        <td><input class="form-control" v-model="request.receiving_group_id"/></td>
+                        <td><input class="form-control" v-model="request.year"/></td>
+                        <td><input class="form-control" v-model="request.month"/></td>
+                        <td><input class="form-control" v-model="request.title"/></td>
+                    </tr>
+                    </tbody>
+                </table>
+                <button class="btn btn-outline-primary" type="button" v-on:click="prepareData">Refresh</button>
+                <button class="btn btn-outline-dark mx-2" type="button" v-on:click="clearFocus">Clear</button>
+            </section>
+
+            <section class="pt-3">
+                <div class="table-responsive table-invoice">
+                    <table class="table table-sm table-bordered table-hover">
+                        <thead>
+                        <tr class="border-0">
+                            <td colspan="4" class="border-0 text-start">{{ invoiceData.receivingGroup?.name || '##' }}</td>
+                            <td colspan="2" class="border-0"></td>
+                            <td colspan="2" class="border-0 text-start">Report: {{ invoiceData.reportPeriod || '##' }}</td>
+                            <td colspan="5" class="border-0"></td>
+                        </tr>
+                        <tr class="border-0">
+                            <td colspan="4" class="border-0 text-center">{{ invoiceData.staticText || '##' }}</td>
+                            <td colspan="2" class="border-0"></td>
+                            <td colspan="2" class="border-0 text-start">{{ invoiceData.payingGroup?.name || '##' }}</td>
+                            <td colspan="5" class="border-0"></td>
+                        </tr>
+                        <tr class="border-0">
+                            <td colspan="8" class="border-0 text-center">{{ invoiceData.invoiceTitle || '##' }}</td>
+                            <td colspan="5" class="border-0"></td>
+                        </tr>
+                        <tr class="border-0">
+                            <td colspan="8" class="border-0 text-center">Total Amount {{ Intl.NumberFormat().format(invoiceData.total.totalAmount) || '##' }}円</td>
+                            <td colspan="5" class="border-0"></td>
+                        </tr>
+
+                        <tr class="text-center">
+                            <th>取引年月日</th>
+                            <th>名目</th>
+                            <th>数量</th>
+                            <th>単位</th>
+                            <th>実績</th>
+                            <th>金額（非課税・不課税）</th>
+                            <th>金額（{{db.consumption_taxes.reduced_tax_rate}}％税込） </th>
+                            <th>金額（{{db.consumption_taxes.tax_rate}}％税込）</th>
+
+                            <th class="text-muted fw-normal">subTotal</th>
+                            <th class="text-muted fw-normal">incomeAmount</th>
+                            <th class="text-muted fw-normal">dealAmount</th>
+                            <th class="text-muted fw-normal">reducedTax</th>
+                            <th class="text-muted fw-normal">tax</th>
+                        </tr>
+                        </thead>
+
+                        <tbody>
+                        <tr v-for="(row, i) in invoiceData.reportData">
+                            <td class="text-center" :id=`month-${i}`>{{ row.month }}</td>
+                            <td class="text-center" :id=`name-${i}` v-html="row.name"></td>
+                            <td class="text-center cursor-pointer"
+                                :id=`income_value-${i}`
+                                :class="{
+                                    'formula-cell': isFormulaElement(i, row, 'income_value') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'income_value') === 2,
+                                }">
+                                {{ row.quantity }}
+                            </td>
+                            <td class="text-center cursor-pointer" :id=`unit-${i}`>{{ row.unit }}</td>
+                            <td class="text-center cursor-pointer" :id=`achievement-${i}` v-html="row.achievement"></td>
+                            <td class="text-end cursor-pointer"
+                                :id=`amountNonTax-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'amountNonTax'),
+                                    'formula-cell': isFormulaElement(i, row, 'amountNonTax') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'amountNonTax') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'amountNonTax')">
+                                {{ Intl.NumberFormat().format(row.amountNonTax) }}
+                            </td>
+                            <td class="text-end cursor-pointer"
+                                :id=`amountReducedTax-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'amountReducedTax'),
+                                    'formula-cell': isFormulaElement(i, row, 'amountReducedTax') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'amountReducedTax') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'amountReducedTax')">
+                                {{ Intl.NumberFormat().format(row.amountReducedTax) }}
+                            </td>
+                            <td class="text-end cursor-pointer"
+                                :id=`amountTax-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'amountTax'),
+                                    'formula-cell': isFormulaElement(i, row, 'amountTax') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'amountTax') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'amountTax')">
+                                {{ Intl.NumberFormat().format(row.amountTax) }}
+                            </td>
+
+                            <th class="text-muted cursor-pointer"
+                                :id=`subTotal-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'subTotal'),
+                                    'formula-cell': isFormulaElement(i, row, 'subTotal') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'subTotal') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'subTotal')">
+                                {{ Intl.NumberFormat().format(row.subTotal) }}
+                            </th>
+                            <th class="text-muted cursor-pointer"
+                                :id=`incomeAmount-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'incomeAmount'),
+                                    'formula-cell': isFormulaElement(i, row, 'incomeAmount') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'incomeAmount') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'incomeAmount')">
+                                {{ Intl.NumberFormat().format(row.incomeAmount) }}
+                            </th>
+                            <th class="text-muted cursor-pointer"
+                                :id=`dealAmount-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'dealAmount'),
+                                    'formula-cell': isFormulaElement(i, row, 'dealAmount') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'dealAmount') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'dealAmount')">
+                                {{ Intl.NumberFormat().format(row.dealAmount) }}
+                            </th>
+                            <th class="text-muted cursor-pointer"
+                                :id=`reducedTax-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'reducedTax'),
+                                    'formula-cell': isFormulaElement(i, row, 'reducedTax') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'reducedTax') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'reducedTax')">
+                                {{ Intl.NumberFormat().format(row.reducedTax) }}
+                            </th>
+                            <th class="text-muted cursor-pointer"
+                                :id=`tax-${i}`
+                                :class="{
+                                    'focus-cell': isFocusCell(i, 'tax'),
+                                    'formula-cell': isFormulaElement(i, row, 'tax') === 1,
+                                    'element-cell': isFormulaElement(i, row, 'tax') === 2,
+                                }"
+                                v-on:click="focusCell(i, 'tax')">
+                                {{ Intl.NumberFormat().format(row.tax) }}
+                            </th>
+                        </tr>
+                        </tbody>
+                        <tfoot>
+                        <tr>
+                            <td></td>
+                            <td colspan="4" class="text-center">（１）税込み計 </td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.amountNonTax) }}</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.amountReducedTax) }}</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.amountTax) }}</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td colspan="4" class="text-center">（２）消費税額（１）から算出）</td>
+                            <td></td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.reducedTax) }}</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.tax) }}</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td colspan="4" class="text-center">（３）税抜き金額（（１）-（２））</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.exclude.amountNonTax) }}</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.exclude.reducedTax) }}</td>
+                            <td class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.exclude.tax) }}</td>
+                        </tr>
+                        <tr>
+                            <td></td>
+                            <td colspan="4" class="text-center">合計（（２）+（３））</td>
+                            <td colspan="3" class="text-end">{{ Intl.NumberFormat().format(invoiceData.total.totalAmount) }}</td>
+                        </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+<script>
+    function formatNumber(number) {
+        return Intl.NumberFormat().format(number)
+    }
+
+    $(function () {
+
+    })
+
+    const app = Vue.createApp({
+        data() {
+            return {
+                api: 'https://api.jsonsilo.com/public/194930d2-ae97-4463-b7c3-56b62af3b5f9',
+                apiKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX3V1aWQiOiJORWc4UHVXdlZVZ29JUjhpS0ZiNHB4NkQ1cFQyIiwiaXNzIjoiaHR0cHM6Ly9qc29uc2lsby5jb20iLCJleHAiOjE3MzAzNzM0NzR9.dF0-Sre3kGywB2AWSWVBbXBRlWMR1Mpju7Hhauq359k',
+                db: {
+                    products: [],
+                    deal_types: [],
+                    deals: [],
+                    groups: [],
+                    group_histories: [],
+                    producers: [],
+                    admins: [],
+                    unioss_users: [],
+                    orders: [],
+                    order_details: [],
+                },
+                blockTables: ['deal_types'],
+                tables: {
+                    products: ["price", "product_id", "producer_id", "product_name", "wholesale_price"],
+                    deal_types: ['deal_type_id', 'income_type_id'],
+                    deals: ["deal_id", "name", "deal_type_id", "producer_id", "income_value", "receiving_group_id", "paying_group_id", "reduced_tax_flg", "tax_calculation_type"],
+                    groups: ['group_id', 'name'],
+                    group_histories: ['group_history_id', 'group_id', 'group_name', 'invoiceRegNo'],
+                    producers: ['producer_id', 'admin_id'],
+                    admins: ['admin_id', 'unioss_user_id'],
+                    unioss_users: ['unioss_user_id', 'group_id', 'unioss_user_name', 'invoiceRegNo'],
+                    orders: ['order_id', 'status', 'amount'],
+                    order_details: ['order_detail_id', 'order_id', 'product_id', 'price', 'maker_price', 'num']
+                },
+                focusData: {
+                    index: null,
+                    attribute: '',
+                },
+                request: {
+                    paying_group_id: '',
+                    receiving_group_id: '2',
+                    year: '',
+                    month: '',
+                    title: '',
+                },
+                invoiceData: {
+                    receivingGroup: {},
+                    payingGroup: {},
+                    reportPeriod: '',
+                    staticText: 'Lorem Ipsum is Lorem',
+                    invoiceTitle: '',
+                    amountTitle: '',
+                    reportData: [],
+                    total: {
+                        amountNonTax: 0,
+                        amountReducedTax : 0,
+                        amountTax: 0,
+                        reducedTax: 0,
+                        tax: 0,
+                        exclude: {
+                            amountNonTax : 0,
+                            reducedTax : 0,
+                            tax: 0,
+                        },
+                        totalAmount: 0,
+                    }
+                },
+                timeout: null,
+                dbElements: {
+                    consumption_taxes: ['tax_rate', 'reduced_tax_rate'],
+                    order_details: ['price', 'maker_price', 'num', 'product_id']
+                },
+                tooltips: new Map(),
+            }
+        },
+        async created() {
+            await this.fetchData()
+            this.initData()
+
+            await new Promise(r => setTimeout(r, 0));
+            this.prepareData()
+        },
+        computed: {
+            product_producer_maps() {
+                return this.db.products.reduce((acc, product) => {
+                    acc[product.product_id] = product.producer_id
+                    return acc
+                }, {})
+            }
+        },
+        watch: {
+            'request.receiving_group_id'(value) {
+                this.invoiceData.receivingGroup = value ? this.db.groups.find(x => x.group_id == value) || {} : {}
+            },
+            'request.paying_group_id'(value) {
+                this.invoiceData.payingGroup = value ? this.db.groups.find(x => x.group_id == value) || {} : {}
+            },
+            'request.year'(value) {
+                this.changeReportPeriod(value, this.request.month)
+                this.updateInvoiceTitle(this.request.title, value, this.request.month)
+            },
+            'request.month'(value) {
+                this.changeReportPeriod(this.request.year, value)
+                this.updateInvoiceTitle(this.request.title, this.request.year, value)
+            },
+            'request.title'(value) {
+                this.updateInvoiceTitle(value, this.request.year, this.request.month)
+            },
+            // db: {
+            //     handler: function(value) {
+            //         this.syncData(value)
+            //     },
+            //     deep: true
+            // }
+        },
+        methods: {
+            syncData(data) {
+                const me = this
+                clearTimeout(this.timeout);
+                this.timeout = setTimeout(() => {
+                    $.ajax({
+                        url: 'https://api.jsonsilo.com/api/v1/manage/194930d2-ae97-4463-b7c3-56b62af3b5f9',
+                        type: 'PATCH',
+                        data: {
+                            file_name: 'Silo DB'
+                        },
+                        dataType: 'json'
+                    }).done(function (response) {
+                        console.log(response.updated_at)
+                    }).fail(function (err) {
+                        console.error(err)
+                    });
+                }, 2000)
+            },
+
+            async fetchData() {
+                const me = this
+                await $.ajax({
+                    url: this.api,
+                    type: 'GET',
+                    async: false,
+                    dataType: 'json'
+                }).done(function (response) {
+                    me.db = response || {}
+                }).fail(function (err) {
+                    console.error(err)
+                });
+            },
+
+            isDBFormulaElement(table, attribute, rowData = null) {
+                try {
+                    if (this.focusData.index != null && this.focusData.attribute.length > 0) {
+                        const dealRow = this.invoiceData?.reportData[this.focusData.index]
+                        switch (this.focusData.attribute) {
+                            case 'subTotal':
+                                if (['deals'].indexOf(table) >= 0
+                                    && ['deal_type_id'].indexOf(attribute) >= 0
+                                    && dealRow.deal_id == rowData.deal_id
+                                    && dealRow.deal_type_id == rowData.deal_type_id
+                                ) {
+                                    return true
+                                }
+                                switch (dealRow.deal_type_id) {
+                                    case 1:
+                                        if (table === 'order_details'
+                                            && dealRow.producer_id == this.product_producer_maps[rowData.product_id]
+                                            && ['price', 'num', 'product_id'].indexOf(attribute) >= 0
+                                        ) {
+                                            return true
+                                        }
+                                        break
+                                    case 2:
+                                        if (table === 'deals'
+                                            && dealRow.deal_id == rowData.deal_id
+                                            && ['income_value'].indexOf(attribute) >= 0
+                                        ) {
+                                            return true
+                                        }
+                                        break
+                                    case 3:
+                                        if (table === 'order_details'
+                                            && dealRow.producer_id == this.product_producer_maps[rowData.product_id]
+                                            && ['maker_price', 'num'].indexOf(attribute) >= 0
+                                        ) {
+                                            return true
+                                        }
+                                        break
+                                }
+                                break
+                            case 'incomeAmount':
+                                if (['deals'].indexOf(table) >= 0
+                                    && ['reduced_tax_flg'].indexOf(attribute) >= 0
+                                    && dealRow.deal_id == rowData.deal_id
+                                ) {
+                                    return true
+                                }
+                                break
+                            case 'dealAmount':
+                                if (['deals'].indexOf(table) >= 0
+                                    && ['reduced_tax_flg', 'tax_calculation_type'].indexOf(attribute) >= 0
+                                    && dealRow.deal_id == rowData.deal_id
+                                ) {
+                                    return true
+                                }
+                                break
+                            // case 'amountNonTax':
+                            //
+                            //     break
+                            // case 'reducedTax':
+                            //
+                            //     break
+                            // case 'amountReducedTax':
+                            //
+                            //     break
+                            // case 'tax':
+                            //
+                            //     break
+                            // case 'amountTax':
+                            //
+                            //     break
+                        }
+                    }
+                } catch (e) {
+                    console.error(e)
+                }
+
+                return false
+            },
+
+            isFormulaElement(index, dealRow, attribute) {
+                if (this.focusData.index != null && this.focusData.index === index && this.focusData.attribute.length > 0) {
+                    let elements
+                    switch (this.focusData.attribute) {
+                        case 'subTotal':
+                            switch (dealRow.deal_type_id) {
+                                case 1:
+                                    if (['deal_type_id'].indexOf(attribute) >= 0) return 1
+                                    if (['order_details.price', 'order_details.num'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 2:
+                                    if (['deal_type_id'].indexOf(attribute) >= 0) return 1
+                                    // if (['income_value'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 3:
+                                    if (['deal_type_id'].indexOf(attribute) >= 0) return 1
+                                    if (['order_details.maker_price', 'order_details.num'].indexOf(attribute) >= 0) return 2
+                                    break
+                            }
+                            break
+                        case 'incomeAmount':
+                            if (['deal_type_id'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.deal_type_id) {
+                                case 1:
+                                    if (['subTotal', 'income_value'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 2:
+                                    if (['subTotal'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 3:
+                                    if (['subTotal', 'income_value'].indexOf(attribute) >= 0) return 2
+                                    break
+                            }
+                            break
+
+                        case 'dealAmount':
+                            if (['reduced_tax_flg', 'tax_calculation_type'].indexOf(attribute) >= 0) return 1
+                            elements = ['incomeAmount']
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0:
+                                    if (dealRow.tax_calculation_type == 0) elements.push('consumption_taxes.tax_rate')
+                                    if (elements.indexOf(attribute) >= 0) return 2
+                                    break
+                                case 1:
+                                    if (dealRow.tax_calculation_type == 0) elements.push('consumption_taxes.reduced_tax_rate')
+                                    if (elements.indexOf(attribute) >= 0) return 2
+                                    break
+                                case 2:
+                                    if (elements.indexOf(attribute) >= 0) return 2
+                                    break
+                            }
+                            break
+
+                        case 'amountNonTax':
+                            if (['reduced_tax_flg'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0: case 1: break
+                                case 2:
+                                    if (['incomeAmount'].indexOf(attribute) >= 0) return 2
+                                    break
+                            }
+                            break
+
+                        case 'reducedTax':
+                            if (['reduced_tax_flg'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0: break
+                                case 1:
+                                    if (['dealAmount', 'consumption_taxes.reduced_tax_rate'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 2: break
+                            }
+                            break
+
+                        case 'amountReducedTax':
+                            if (['reduced_tax_flg'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0: break
+                                case 1:
+                                    if (['dealAmount', 'reducedTax'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 2: break
+                            }
+                            break
+
+                        case 'tax':
+                            if (['reduced_tax_flg'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0:
+                                    if (['dealAmount', 'consumption_taxes.tax_rate'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 1: case 2: break
+                            }
+                            break
+
+                        case 'amountTax':
+                            if (['reduced_tax_flg'].indexOf(attribute) >= 0) return 1
+                            switch (dealRow.reduced_tax_flg) {
+                                case 0:
+                                    if (['dealAmount', 'tax'].indexOf(attribute) >= 0) return 2
+                                    break
+                                case 1: case 2: break
+                            }
+                            break
+                    }
+                }
+                return 0
+            },
+
+            isFocusCell(index, attribute) {
+                return this.focusData.index === index && this.focusData.attribute === attribute
+            },
+
+            focusCell(index, attribute) {
+                if (this.isFocusCell(index, attribute)) {
+                    this.clearFocus()
+                } else {
+                    this.focusData.index = index
+                    this.focusData.attribute = attribute
+                }
+            },
+
+            clearFocus() {
+                this.focusData = {
+                    index: null,
+                    attribute: '',
+                }
+            },
+
+            resetInvoiceData() {
+                this.invoiceData.reportData = []
+                this.invoiceData.total = {
+                    amountNonTax: 0,
+                    amountReducedTax : 0,
+                    amountTax: 0,
+                    reducedTax: 0,
+                    tax: 0,
+                    exclude: {
+                        amountNonTax : 0,
+                        reducedTax : 0,
+                        tax: 0,
+                    },
+                    totalAmount: 0,
+                }
+            },
+
+            initData() {
+                this.request = {
+                    paying_group_id: 2,
+                    receiving_group_id: 1,
+                    year: 2024,
+                    month: 10,
+                    title: 'Báo cáo thuế tháng MM năm YYYY',
+                }
+            },
+
+            calcDealAmount(i, reducedTaxFlg, taxCalculationType, incomeAmount, taxRate = 0) {
+                // WHEN deal no tax OR incomeAmount not included tax yet
+                // THEN dealAmount = incomeAmount
+                if (reducedTaxFlg == 2 || taxCalculationType == 1) {
+                    this.tooltips.set(`dealAmount-${i}`, 'reducedTaxFlg = 2 || taxCalculationType = 1<br/>=> dealAmount = incomeAmount')
+
+                    return incomeAmount
+                }
+                this.tooltips.set(`dealAmount-${i}`, `reducedTaxFlg = 0,1 && taxCalculationType = 0<br/>=> incomeAmount / (1 + taxRate / 100)<br/><small><i>- taxRate=${taxRate}</i></small>`)
+
+                return Math.round(incomeAmount / (1 + taxRate / 100))
+            },
+
+            calcTax(dealAmount, taxRate) {
+                return Math.round(dealAmount * taxRate / 100)
+            },
+
+            calcAmountTax(dealAmount, tax) {
+                return dealAmount + tax
+            },
+
+            prepareData() {
+                this.resetInvoiceData()
+
+                this.tooltips = new Map()
+                const taxRate = this.db.consumption_taxes.tax_rate
+                const reducedTaxRate = this.db.consumption_taxes.reduced_tax_rate
+
+                // Map producer_id
+                for (const orderDetail of this.db.order_details) {
+                    orderDetail.producer_id = this.product_producer_maps[orderDetail.product_id]
+                }
+
+                // Get availableProducerIds
+                const availableProducerIds = new Set(this.db.order_details.map(x => x.producer_id))
+
+                const reportData = []
+                const deals = []
+                const producerDeals = []
+                // Get Deals
+                for (const i in this.db.deals) {
+                    const deal = this.db.deals[i]
+                    if (deal.receiving_group_id == this.request.receiving_group_id && deal.paying_group_id == this.request.paying_group_id) {
+                        if (!deal.producer_id && deal.deal_type_id == 3) {
+                            producerDeals.push({...deal})
+                        } else {
+                            deals.push({...deal})
+                        }
+                    }
+                }
+
+                // Get Deals if empty producer_id
+                if (producerDeals.length > 0) {
+                    const setBoughtProductIds = new Set(this.db.order_details.map(x => x.product_id))
+                    const boughtProducts = this.db.products.filter(x => setBoughtProductIds.has(x.product_id))
+                    const setProducerIds = new Set(boughtProducts.map(x => x.producer_id))
+                    for (const deal of producerDeals) {
+                        for (const producer_id of setProducerIds) {
+                            deals.push({
+                                ...deal,
+                                producer_id: producer_id,
+                            })
+                        }
+                    }
+                }
+
+                for (const i in deals) {
+                    const deal = deals[i]
+                    // Name
+                    let name = [deal.name]
+                    let producerName = ''
+                    let usageOrderDetails = []
+                    if (!!deal.producer_id) {
+                        const producer = this.db.producers?.find(x => x.producer_id == deal.producer_id)
+                        const admin = this.db.admins?.find(x => x.admin_id == producer.admin_id)
+                        const uniossUser = this.db.unioss_users?.find(x => x.unioss_user_id == admin.unioss_user_id)
+
+                        producerName = uniossUser.unioss_user_name
+                        const invoiceRegNo = uniossUser.invoiceRegNo
+
+                        name.push(producerName)
+                        name.push(`InvoiceRegNo: ${invoiceRegNo}`)
+
+                        usageOrderDetails = this.db.order_details.filter(x => x.producer_id == deal.producer_id)
+                    } else {
+                        usageOrderDetails = this.db.order_details.filter(x => availableProducerIds.has(x.producer_id))
+                    }
+
+                    // Quantity + Unit
+                    const dealType = this.db.deal_types?.find(x => x.deal_type_id == deal.deal_type_id)
+                    const incomeTypeId = dealType?.income_type_id
+                    let quantity = deal.income_value
+                    let unit = incomeTypeId == 1 ? '円' : '%'
+                    if (quantity == 100 && incomeTypeId == 1) {
+                        quantity = unit = '-'
+                    }
+
+                    // deal_type_id = 1,3: Total price/maker_price * num or order_details
+                    // deal_type_id = 2: income_value
+                    let subTotal = 0
+
+                    // deal_type_id = 1,3: subTotal * income_value (%)
+                    // deal_type_id = 2: income_value
+                    let incomeAmount = 0
+
+                    // tax_calculation_type = 0:
+                    // tax_calculation_type = 1:
+                    let dealAmount = 0 // IF
+                    let tax = 0  // IF dealAmount * taxRate/100
+                    let amountTax = 0
+                    let reducedTax = 0  // dealAmount * reducedTaxRate
+                    let amountReducedTax = 0
+                    let amountNonTax = 0
+
+                    // subTotal, incomeAmount, achievement
+                    let achievement = ''
+                    switch (deal.deal_type_id) {
+                        case 1:
+                            // deal_type_id = 1,3: Total price/maker_price * num or order_details
+                            subTotal = usageOrderDetails.reduce((acc, cur) => acc + cur.price * cur.num, 0)
+                            this.tooltips.set(`subTotal-${i}`, 'deal.deal_type_id=1<br/>=> Total order_details.price * order_details.num')
+
+                            // deal_type_id = 1,3: subTotal * income_value (%)
+                            incomeAmount = subTotal * deal.income_value / 100
+                            this.tooltips.set(`incomeAmount-${i}`, 'deal.deal_type_id=1,3<br/>=> subTotal * deal.income_value / 100')
+
+                            achievement = `寄付金額合計${formatNumber(subTotal)}円`
+                            this.tooltips.set(`achievement-${i}`, 'deal.deal_type_id=1<br/>=> 寄付金額合計{subTotal}円')
+                            break;
+                        case 2:
+                            quantity = unit = '-'
+                            this.tooltips.set(`income_value-${i}`, 'deal.deal_type_id=2<br/>=> display income_value as "-"')
+                            this.tooltips.set(`unit-${i}`, 'deal.deal_type_id=2<br/>=> display unit as "-"')
+
+                            // deal_type_id = 2: income_value
+                            subTotal = incomeAmount = deal.income_value
+                            this.tooltips.set(`subTotal-${i}`, 'deal.deal_type_id=2<br/>=> subTotal=deal.income_value')
+                            this.tooltips.set(`incomeAmount-${i}`, 'deal.deal_type_id=2<br/>=> incomeAmount=deal.income_value')
+
+                            achievement = `${formatNumber(subTotal)}円`
+                            this.tooltips.set(`achievement-${i}`, 'deal.deal_type_id=2<br/>=> {subTotal}円')
+                            break;
+                        case 3:
+                            // deal_type_id = 1,3: Total price/maker_price * num or order_details
+                            subTotal = usageOrderDetails.reduce((acc, cur) => acc + cur.maker_price * cur.num, 0)
+                            this.tooltips.set(`subTotal-${i}`, 'deal.deal_type_id=3<br/>=> Total order_details.maker_price * order_details.num<br/>by producer')
+
+                            // deal_type_id = 1,3: subTotal * income_value (%)
+                            incomeAmount = subTotal * deal.income_value / 100
+                            this.tooltips.set(`incomeAmount-${i}`, 'deal.deal_type_id=1,3<br/>=> subTotal * deal.income_value / 100')
+
+                            achievement = deal.name
+                            if (producerName.length > 0) {
+                                achievement += ` (${producerName})`
+                            }
+                            this.tooltips.set(`achievement-${i}`, 'deal.deal_type_id=3<br/>=> {deal.name}({producerName})')
+                            break;
+                    }
+
+                    // dealAmount, tax, amountTax, reducedTax, amountReducedTax, amountNonTax
+                    switch (deal.reduced_tax_flg) {
+                        // use taxRate to calculate
+                        case 0:
+                            dealAmount = this.calcDealAmount(i, deal.reduced_tax_flg, deal.tax_calculation_type, incomeAmount, taxRate)
+
+                            tax = this.calcTax(dealAmount, taxRate)
+                            this.tooltips.set(`tax-${i}`, `deal.reduced_tax_flg=0<br/>dealAmount * taxRate / 100`)
+
+                            amountTax = this.calcAmountTax(dealAmount, tax)
+                            this.tooltips.set(`amountTax-${i}`, 'deal.reduced_tax_flg=0<br/>= dealAmount + tax')
+
+                            reducedTax = 0
+                            amountReducedTax = 0
+                            amountNonTax = 0
+                            break;
+                        // use reducedTaxRate to calculate
+                        case 1:
+                            dealAmount = this.calcDealAmount(i, deal.reduced_tax_flg, deal.tax_calculation_type, incomeAmount, reducedTaxRate)
+                            tax = 0
+                            amountTax = 0
+
+                            reducedTax = this.calcTax(dealAmount, reducedTaxRate)
+                            this.tooltips.set(`reducedTax-${i}`, `deal.reduced_tax_flg=1<br/>dealAmount * reducedTaxRate / 100`)
+
+                            amountReducedTax = this.calcAmountTax(dealAmount, tax)
+                            this.tooltips.set(`amountReducedTax-${i}`, 'deal.reduced_tax_flg=1<br/>= dealAmount + reducedTax')
+
+                            amountNonTax = 0
+                            break;
+                        // don't include taxRate or reducedTaxRate
+                        case 2:
+                            dealAmount = this.calcDealAmount(i, deal.reduced_tax_flg, deal.tax_calculation_type, incomeAmount)
+                            tax = 0
+                            amountTax = 0
+                            reducedTax = 0
+                            amountReducedTax = 0
+
+                            amountNonTax = incomeAmount
+                            this.tooltips.set(`amountNonTax-${i}`, 'deal.deal_type_id=3<br/>= amountNonTax = incomeAmount')
+                            break;
+                    }
+
+                    this.invoiceData.total.amountNonTax += amountNonTax
+                    this.invoiceData.total.amountReducedTax += amountReducedTax
+                    this.invoiceData.total.amountTax += amountTax
+
+                    this.invoiceData.total.reducedTax += reducedTax
+                    this.invoiceData.total.tax += tax
+
+                    reportData.push({
+                        ...deal,
+                        month: this.invoiceData.reportPeriod,
+                        name: name.join('<br/>'),
+                        quantity: quantity,
+                        unit: unit,
+                        achievement: achievement,
+
+                        subTotal: subTotal, // Total price/maker_price * num or order_details
+                        incomeAmount: incomeAmount, // Total price/maker_price * num or order_details
+                        dealAmount: dealAmount, // subTotal * quantity (%)
+
+                        amountNonTax: amountNonTax,
+
+                        reducedTax: reducedTax, // dealAmount * reducedTaxRate
+                        amountReducedTax: amountReducedTax,
+
+                        tax: tax, // dealAmount * taxRate
+                        amountTax: amountTax,
+                    })
+                }
+
+                this.invoiceData.total.exclude.amountNonTax = Math.round(this.invoiceData.total.amountNonTax)
+                this.invoiceData.total.exclude.reducedTax = Math.round(this.invoiceData.total.amountReducedTax - this.invoiceData.total.reducedTax)
+                this.invoiceData.total.exclude.tax = Math.round(this.invoiceData.total.amountTax - this.invoiceData.total.tax)
+
+                this.invoiceData.total.totalAmount = Math.round(this.invoiceData.total.reducedTax + this.invoiceData.total.tax + this.invoiceData.total.exclude.amountNonTax + this.invoiceData.total.exclude.reducedTax + this.invoiceData.total.exclude.tax)
+
+                this.invoiceData.reportData = reportData
+
+                setTimeout(() => {
+                    this.tooltips.forEach((content, id) => {
+                        tippy(`#${id}`, {
+                            content: content,
+                            trigger: 'click',
+                            allowHTML: true,
+                        });
+                    })
+                }, 0)
+            },
+
+            changeReportPeriod(year, month) {
+                this.invoiceData.reportPeriod = `${year || '####'}/${month || '##'}`
+            },
+
+            updateInvoiceTitle(title, year, month) {
+                title = title.replace('YYYY', year || '####')
+                title = title.replace('MM', month || '##')
+                this.invoiceData.invoiceTitle = title
+            }
+        }
+    })
+
+    app.mount('#app')
+
+</script>
+</body>
+</html>
